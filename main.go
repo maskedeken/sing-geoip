@@ -12,12 +12,13 @@ import (
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/rw"
+	"github.com/v2fly/v2ray-core/v5/app/router/routercommon"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/google/go-github/v45/github"
 	"github.com/maxmind/mmdbwriter"
 	"github.com/maxmind/mmdbwriter/inserter"
 	"github.com/maxmind/mmdbwriter/mmdbtype"
-	"github.com/oschwald/geoip2-golang"
 	"github.com/oschwald/maxminddb-golang"
 	"github.com/sirupsen/logrus"
 )
@@ -65,45 +66,33 @@ func download(release *github.RepositoryRelease) ([]byte, error) {
 	return get(geoipAsset.BrowserDownloadURL)
 }
 
-func parse(binary []byte) (metadata maxminddb.Metadata, countryMap map[string][]*net.IPNet, err error) {
-	database, err := maxminddb.FromBytes(binary)
-	if err != nil {
+func parse(binary []byte) (countryMap map[string][]*net.IPNet, err error) {
+	var geoipList routercommon.GeoIPList
+	if err = proto.Unmarshal(binary, &geoipList); err != nil {
 		return
 	}
-	metadata = database.Metadata
-	networks := database.Networks(maxminddb.SkipAliasedNetworks)
+
 	countryMap = make(map[string][]*net.IPNet)
-	var country geoip2.Enterprise
-	var ipNet *net.IPNet
-	for networks.Next() {
-		ipNet, err = networks.Network(&country)
-		if err != nil {
-			return
+	for _, geoip := range geoipList.Entry {
+		code := strings.ToLower(geoip.CountryCode)
+		for _, cidr := range geoip.Cidr {
+			ip := net.IP(cidr.Ip)
+			ipNet := &net.IPNet{
+				IP:   ip,
+				Mask: net.CIDRMask(int(cidr.Prefix), len(ip)),
+			}
+			countryMap[code] = append(countryMap[code], ipNet)
 		}
-		var code string
-		if country.Country.IsoCode != "" {
-			code = strings.ToLower(country.Country.IsoCode)
-		} else if country.RegisteredCountry.IsoCode != "" {
-			code = strings.ToLower(country.RegisteredCountry.IsoCode)
-		} else if country.RepresentedCountry.IsoCode != "" {
-			code = strings.ToLower(country.RepresentedCountry.IsoCode)
-		} else if country.Continent.Code != "" {
-			code = strings.ToLower(country.Continent.Code)
-		} else {
-			continue
-		}
-		countryMap[code] = append(countryMap[code], ipNet)
 	}
-	err = networks.Err()
 	return
 }
 
-func newWriter(metadata maxminddb.Metadata, codes []string) (*mmdbwriter.Tree, error) {
+func newWriter(codes []string) (*mmdbwriter.Tree, error) {
 	return mmdbwriter.New(mmdbwriter.Options{
 		DatabaseType:            "sing-geoip",
 		Languages:               codes,
-		IPVersion:               int(metadata.IPVersion),
-		RecordSize:              int(metadata.RecordSize),
+		IPVersion:               6,
+		RecordSize:              24,
 		Inserter:                inserter.ReplaceWith,
 		DisableIPv4Aliasing:     true,
 		IncludeReservedNetworks: true,
@@ -165,7 +154,7 @@ func local(input string, output string, codes []string) error {
 	if err != nil {
 		return err
 	}
-	metadata, countryMap, err := parse(binary)
+	countryMap, err := parse(binary)
 	if err != nil {
 		return err
 	}
@@ -173,7 +162,7 @@ func local(input string, output string, codes []string) error {
 	if rw.FileExists(output) {
 		writer, err = open(output, codes)
 	} else {
-		writer, err = newWriter(metadata, codes)
+		writer, err = newWriter(codes)
 	}
 	if err != nil {
 		return err
@@ -200,7 +189,7 @@ func release(source string, destination string) error {
 	if err != nil {
 		return err
 	}
-	metadata, countryMap, err := parse(binary)
+	countryMap, err := parse(binary)
 	if err != nil {
 		return err
 	}
@@ -208,7 +197,7 @@ func release(source string, destination string) error {
 	for code := range countryMap {
 		allCodes = append(allCodes, code)
 	}
-	writer, err := newWriter(metadata, allCodes)
+	writer, err := newWriter(allCodes)
 	if err != nil {
 		return err
 	}
@@ -216,7 +205,7 @@ func release(source string, destination string) error {
 	if err != nil {
 		return err
 	}
-	writer, err = newWriter(metadata, []string{"cn"})
+	writer, err = newWriter([]string{"cn"})
 	if err != nil {
 		return err
 	}
@@ -240,7 +229,7 @@ func main() {
 	if len(os.Args) >= 3 {
 		err = local(os.Args[1], os.Args[2], os.Args[3:])
 	} else {
-		err = release("Dreamacro/maxmind-geoip", "sagernet/sing-geoip")
+		err = release("v2fly/geoip", "sagernet/sing-geoip")
 	}
 	if err != nil {
 		logrus.Fatal(err)
