@@ -79,7 +79,7 @@ func parse(binary []byte) (countryMap map[string][]*net.IPNet, err error) {
 			ip := net.IP(cidr.Ip)
 			ipNet := &net.IPNet{
 				IP:   ip,
-				Mask: net.CIDRMask(int(cidr.Prefix), len(ip)),
+				Mask: net.CIDRMask(int(cidr.Prefix), 8*len(ip)),
 			}
 			countryMap[code] = append(countryMap[code], ipNet)
 		}
@@ -162,7 +162,11 @@ func local(input string, output string, codes []string) error {
 	if rw.FileExists(output) {
 		writer, err = open(output, codes)
 	} else {
-		writer, err = newWriter(codes)
+		allCodes := make([]string, 0, len(countryMap))
+		for code := range countryMap {
+			allCodes = append(allCodes, code)
+		}
+		writer, err = newWriter(allCodes)
 	}
 	if err != nil {
 		return err
