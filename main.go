@@ -209,11 +209,12 @@ func release(source string, destination string) error {
 	if err != nil {
 		return err
 	}
-	writer, err = newWriter([]string{"cn"})
+	codes := []string{"cn", "private"}
+	writer, err = newWriter(codes)
 	if err != nil {
 		return err
 	}
-	err = write(writer, countryMap, "geoip-cn.db", []string{"cn"})
+	err = write(writer, countryMap, "geoip-only-cn-private.db", codes)
 	if err != nil {
 		return err
 	}
