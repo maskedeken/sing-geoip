@@ -234,7 +234,7 @@ func main() {
 	if len(os.Args) >= 3 {
 		err = local(os.Args[1], os.Args[2], os.Args[3:])
 	} else {
-		err = release("v2fly/geoip", "sagernet/sing-geoip")
+		err = release("v2fly/geoip", "maskedeken/sing-geoip")
 	}
 	if err != nil {
 		logrus.Fatal(err)
